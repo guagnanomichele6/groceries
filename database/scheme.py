@@ -1,12 +1,11 @@
-import sqlite3
+from database.connection import get_connection
 
-DB_NAME = "finance_food.db"
-
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
+def initialize_database():
+    """Initializes the database schema by creating all required tables."""
+    conn = get_connection()
     cursor = conn.cursor()
     
-    # --- 1. AREA FINANZA ---
+    # --- 1. FINANCE MODULE ---
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,11 +49,13 @@ def init_db():
             currency TEXT NOT NULL DEFAULT 'EUR',
             frequency TEXT NOT NULL DEFAULT 'Mensile',
             day_of_month INTEGER NOT NULL DEFAULT 1,
+            category TEXT NOT NULL DEFAULT 'Bollette',
+            op_type TEXT NOT NULL DEFAULT 'Spesa',
             FOREIGN KEY (account_id) REFERENCES accounts (id)
         )
-    ''' )
+    ''')
     
-    # --- 2. AREA POSSEDIMENTI (Inventario & Spesa) ---
+    # --- 2. POSSESSIONS & INVENTORY MODULE ---
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS inventory (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,7 +101,7 @@ def init_db():
         VALUES (?, ?, ?)
     ''', default_units)
     
-    # --- 3. AREA PASTI ---
+    # --- 3. MEALS & KITCHEN MODULE ---
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS meals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,10 +136,10 @@ def init_db():
         CREATE TABLE IF NOT EXISTS investments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             asset_name TEXT NOT NULL,
-            category TEXT NOT NULL DEFAULT 'ETF', -- ETF, Azioni, Obbligazioni, Cripto
-            account_name TEXT NOT NULL,         -- Es. Directa, Binance, Ledger
+            category TEXT NOT NULL DEFAULT 'ETF',
+            account_name TEXT NOT NULL,
             quantity REAL NOT NULL DEFAULT 0.0,
-            current_value REAL NOT NULL DEFAULT 0.0, -- Controvalore totale aggiornato
+            current_value REAL NOT NULL DEFAULT 0.0,
             currency TEXT NOT NULL DEFAULT 'EUR'
         )
     ''')
@@ -147,5 +148,5 @@ def init_db():
     conn.close()
 
 if __name__ == "__main__":
-    init_db()
-    print("Database inizializzato con successo!")
+    initialize_database()
+    print("Database successfully initialized via schema.py!")

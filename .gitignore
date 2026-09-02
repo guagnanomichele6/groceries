@@ -1,0 +1,11 @@
+# Database e dati locali
+*.db
+finance_food.db
+
+# Cartella dei backup automatici
+backups/
+
+# Cache di Python e Streamlit
+__pycache__/
+.streamlit/
+.DS_Store
