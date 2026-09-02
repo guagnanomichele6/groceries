@@ -24,6 +24,7 @@ def init_db():
             account_id INTEGER,
             total_amount REAL NOT NULL,
             currency TEXT NOT NULL DEFAULT 'EUR',
+            category TEXT NOT NULL DEFAULT 'Spesa',
             description TEXT,
             FOREIGN KEY (account_id) REFERENCES accounts (id)
         )
@@ -39,6 +40,19 @@ def init_db():
             FOREIGN KEY (transaction_id) REFERENCES transactions (id) ON DELETE CASCADE
         )
     ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS recurring_expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            account_id INTEGER,
+            amount REAL NOT NULL,
+            currency TEXT NOT NULL DEFAULT 'EUR',
+            frequency TEXT NOT NULL DEFAULT 'Mensile',
+            day_of_month INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY (account_id) REFERENCES accounts (id)
+        )
+    ''' )
     
     # --- 2. AREA POSSEDIMENTI (Inventario & Spesa) ---
     cursor.execute('''
@@ -114,6 +128,18 @@ def init_db():
             context TEXT NOT NULL DEFAULT 'A Casa (Canonico)',
             consumed INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (meal_id) REFERENCES meals (id) ON DELETE CASCADE
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS investments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_name TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'ETF', -- ETF, Azioni, Obbligazioni, Cripto
+            account_name TEXT NOT NULL,         -- Es. Directa, Binance, Ledger
+            quantity REAL NOT NULL DEFAULT 0.0,
+            current_value REAL NOT NULL DEFAULT 0.0, -- Controvalore totale aggiornato
+            currency TEXT NOT NULL DEFAULT 'EUR'
         )
     ''')
     
