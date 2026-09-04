@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 from database.connection import get_connection
-from services.inventory_service import consume_inventory_item
+from services.inventory_service import consume_inventory_item, restore_inventory_item, get_available_units
 from services.meal_service import parse_natural_language_schedule, apply_ai_schedule_to_db
 
 def render_meals_tab(create_backup_callback):
@@ -52,7 +52,7 @@ def render_meals_tab(create_backup_callback):
                 
                 with st.expander(f"🍲 {m_name}"):
                     conn = get_connection()
-                    df_ing = pd.read_sql("SELECT id, item_name AS 'Ingrediente', quantity AS 'Quantità', unit AS 'Unità' FROM meal_ingredients WHERE meal_id = ?", conn, params=(m_id,))
+                    df_ing = pd.read_sql("SELECT id, item_name AS 'Ingrediente', quantity AS 'Quantità', unit AS 'Unità' FROM meal_ingredients WHERE meal_id = ? ORDER BY item_name ASC", conn, params=(m_id,))
                     conn.close()
                     
                     edited_ing = st.data_editor(df_ing, use_container_width=True, hide_index=True, num_rows="dynamic", key=f"ing_edit_{m_id}")
@@ -106,26 +106,72 @@ def render_meals_tab(create_backup_callback):
                 with c_d3: s_context = st.selectbox("Contesto", ["A Casa (Canonico)", "Fuori Casa", "A Casa di Altri", "Offerto da Me"])
                 
                 conn = get_connection()
-                df_m = pd.read_sql("SELECT id, name FROM meals ORDER BY name", conn)
+                df_m = pd.read_sql("SELECT id, name FROM meals ORDER BY name ASC", conn)
+                available_units = get_available_units()
                 conn.close()
                 m_dict = {row['name']: row['id'] for _, row in df_m.iterrows()} if not df_m.empty else {}
                 
-                sel_meals = st.multiselect("Seleziona Piatti dall'Archivio", list(m_dict.keys()))
+                sel_meals = st.multiselect("Seleziona Piatti dall'Archivio (opzionale)", list(m_dict.keys()))
+                
+                st.markdown("**O aggiungi singoli ingredienti al volo:**")
+                if "sched_extra_ingredients" not in st.session_state:
+                    st.session_state.sched_extra_ingredients = pd.DataFrame(columns=["Ingrediente", "Quantità", "Unità"])
+                
+                edited_extra_ings = st.data_editor(
+                    st.session_state.sched_extra_ingredients, 
+                    num_rows="dynamic", 
+                    use_container_width=True, 
+                    key="sched_extra_editor",
+                    column_config={
+                        "Unità": st.column_config.SelectboxColumn("Unità", options=available_units, required=True)
+                    }
+                )
                 
                 if st.form_submit_button("Pianifica nel Calendario"):
-                    if sel_meals:
+                    if sel_meals or not edited_extra_ings.empty:
                         conn = get_connection()
                         cursor = conn.cursor()
-                        for m_label in sel_meals:
-                            cursor.execute("INSERT INTO calendar_schedule (date, slot, meal_id, context, consumed) VALUES (?, ?, ?, ?, 0)", 
-                                           (str(s_date), s_slot, m_dict[m_label], s_context))
+                        
+                        if sel_meals:
+                            for m_label in sel_meals:
+                                cursor.execute("""
+                                    INSERT INTO calendar_schedule (date, slot, meal_id, context, consumed) 
+                                    VALUES (?, ?, ?, ?, 0)
+                                """, (str(s_date), s_slot, m_dict[m_label], s_context))
+                                schedule_id = cursor.lastrowid
+                                
+                                for _, row in edited_extra_ings.iterrows():
+                                    if pd.notna(row['Ingrediente']) and str(row['Ingrediente']).strip() != "":
+                                        cursor.execute("""
+                                            INSERT INTO calendar_slot_ingredients (schedule_id, item_name, quantity, unit)
+                                            VALUES (?, ?, ?, ?)
+                                        """, (schedule_id, str(row['Ingrediente']).strip().capitalize(), 
+                                              float(row['Quantità']) if pd.notna(row['Quantità']) else 1.0, 
+                                              str(row['Unità'])))
+                        else:
+                            cursor.execute("""
+                                INSERT INTO calendar_schedule (date, slot, meal_id, context, consumed) 
+                                VALUES (?, ?, NULL, ?, 0)
+                            """, (str(s_date), s_slot, s_context))
+                            schedule_id = cursor.lastrowid
+                            
+                            for _, row in edited_extra_ings.iterrows():
+                                if pd.notna(row['Ingrediente']) and str(row['Ingrediente']).strip() != "":
+                                    cursor.execute("""
+                                        INSERT INTO calendar_slot_ingredients (schedule_id, item_name, quantity, unit)
+                                        VALUES (?, ?, ?, ?)
+                                    """, (schedule_id, str(row['Ingrediente']).strip().capitalize(), 
+                                          float(row['Quantità']) if pd.notna(row['Quantità']) else 1.0, 
+                                          str(row['Unità'])))
+                            
                         conn.commit()
                         conn.close()
                         st.success("Pianificato con successo!")
+                        st.session_state.sched_extra_ingredients = pd.DataFrame(columns=["Ingrediente", "Quantità", "Unità"])
                         st.rerun()
                     else:
-                        st.warning("Seleziona almeno un piatto.")
-
+                        st.warning("Seleziona almeno un piatto o inserisci un ingrediente.")
+                        
         st.divider()
         days_c = st.columns(7)
         d_names = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
@@ -156,8 +202,21 @@ def render_meals_tab(create_backup_callback):
                         with st.container(border=True):
                             st.markdown(f"**{emoji} {slot_n}**")
                             st.markdown(f"<small style='color:gray;'>{slot_ctx}</small>", unsafe_allow_html=True)
+                            
+                            # Mostra i piatti dall'archivio
                             for _, _, m_n in s_items: 
-                                st.markdown(f"<small>- {m_n}</small>", unsafe_allow_html=True)
+                                if m_n != 'Piatto non trovato':
+                                    st.markdown(f"<small>- {m_n}</small>", unsafe_allow_html=True)
+                            
+                            # Mostra gli ingredienti extra al volo per questo slot
+                            for sid, _, _ in s_items:
+                                conn_ex = get_connection()
+                                cursor_ex = conn_ex.cursor()
+                                cursor_ex.execute("SELECT item_name, quantity, unit FROM calendar_slot_ingredients WHERE schedule_id = ?", (sid,))
+                                extra_ings = cursor_ex.fetchall()
+                                conn_ex.close()
+                                for einame, eiq, eiunit in extra_ings:
+                                    st.markdown(f"<small style='color: #0288d1;'>- [Extra] {einame} ({eiq} {eiunit})</small>", unsafe_allow_html=True)
                             
                             with st.expander("✏️ Modifica"):
                                 with st.form(f"edit_slot_form_{d_str}_{slot_n}"):
@@ -228,10 +287,18 @@ def render_meals_tab(create_backup_callback):
                                             res_slot = cursor.fetchone()
                                             if res_slot:
                                                 mid, ctx = res_slot
-                                                if mid and ctx in ['A Casa (Canonico)', 'Offerto da Me']:
-                                                    cursor.execute("SELECT item_name, quantity, unit FROM meal_ingredients WHERE meal_id = ?", (mid,))
-                                                    for iname, iq, iunit in cursor.fetchall():
-                                                        consume_inventory_item(cursor, iname, iq, iunit)
+                                                if ctx in ['A Casa (Canonico)', 'Offerto da Me']:
+                                                    # Consuma ingredienti del piatto da archivio
+                                                    if mid:
+                                                        cursor.execute("SELECT item_name, quantity, unit FROM meal_ingredients WHERE meal_id = ?", (mid,))
+                                                        for iname, iq, iunit in cursor.fetchall():
+                                                            consume_inventory_item(cursor, iname, iq, iunit)
+                                                    
+                                                    # Consuma ingredienti extra al volo
+                                                    cursor.execute("SELECT item_name, quantity, unit FROM calendar_slot_ingredients WHERE schedule_id = ?", (sid,))
+                                                    for einame, eiq, eiunit in cursor.fetchall():
+                                                        consume_inventory_item(cursor, einame, eiq, eiunit)
+                                                        
                                             cursor.execute("UPDATE calendar_schedule SET consumed = 1 WHERE id = ?", (sid,))
                                         conn.commit()
                                         conn.close()
@@ -240,10 +307,32 @@ def render_meals_tab(create_backup_callback):
                             if st.button("❌ Elimina Slot", key=f"d_{d_str}_{slot_n}"):
                                 conn = get_connection()
                                 cursor = conn.cursor()
-                                for sid, _, _ in s_items:
+                                
+                                for sid, meal_id_val, _ in s_items:
+                                    cursor.execute("SELECT consumed, meal_id, context FROM calendar_schedule WHERE id = ?", (sid,))
+                                    row_data = cursor.fetchone()
+                                    
+                                    if row_data:
+                                        is_consumed, m_id, ctx = row_data
+                                        if is_consumed == 1 and ctx in ['A Casa (Canonico)', 'Offerto da Me']:
+                                            # Ripristina ingredienti del piatto archiviato
+                                            if m_id:
+                                                cursor.execute("SELECT item_name, quantity, unit FROM meal_ingredients WHERE meal_id = ?", (m_id,))
+                                                ingredients = cursor.fetchall()
+                                                for iname, iq, iunit in ingredients:
+                                                    restore_inventory_item(cursor, iname, iq, iunit)
+                                            
+                                            # Ripristina ingredienti extra
+                                            cursor.execute("SELECT item_name, quantity, unit FROM calendar_slot_ingredients WHERE schedule_id = ?", (sid,))
+                                            extra_ings = cursor.fetchall()
+                                            for einame, eiq, eiunit in extra_ings:
+                                                restore_inventory_item(cursor, einame, eiq, eiunit)
+                                                
                                     cursor.execute("DELETE FROM calendar_schedule WHERE id = ?", (sid,))
+                                    
                                 conn.commit()
                                 conn.close()
+                                st.success("Slot eliminato e dispensa aggiornata correttamente!")
                                 st.rerun()
 
     with sub_m3:

@@ -12,7 +12,7 @@ def render_possessions_tab():
     with sub_p1:
         st.subheader("Tabella Inventario & Dispensa")
         conn = get_connection()
-        df_inv = pd.read_sql("SELECT id, item_name AS 'Prodotto', category AS 'Categoria', quantity AS 'Quantità', unit AS 'Unità' FROM inventory", conn)
+        df_inv = pd.read_sql("SELECT id, item_name AS 'Prodotto', category AS 'Categoria', quantity AS 'Quantità', unit AS 'Unità' FROM inventory ORDER BY item_name ASC", conn)
         conn.close()
         if not df_inv.empty:
             edited_inv = st.data_editor(df_inv, use_container_width=True, hide_index=True, num_rows="dynamic", key="inv_table_editor")
@@ -62,7 +62,7 @@ def render_possessions_tab():
     with sub_p2:
         st.subheader("Lista della Spesa")
         conn = get_connection()
-        df_shop = pd.read_sql("SELECT id, item_name AS 'Prodotto', quantity AS 'Quantità', unit AS 'Unità', category AS 'Categoria' FROM shopping_list", conn)
+        df_shop = pd.read_sql("SELECT id, item_name AS 'Prodotto', quantity AS 'Quantità', unit AS 'Unità', category AS 'Categoria' FROM shopping_list ORDER BY item_name ASC", conn)
         conn.close()
         edited_shop = st.data_editor(df_shop, use_container_width=True, hide_index=True, num_rows="dynamic", key="shop_table_editor")
         if st.button("💾 Salva Lista della Spesa"):

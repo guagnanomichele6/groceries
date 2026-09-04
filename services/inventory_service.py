@@ -1,5 +1,22 @@
 from database.connection import get_connection
 
+def restore_inventory_item(cursor, item_name, qty_needed, recipe_unit):
+    """Restores an item back to the inventory (reverse of consumption)."""
+    cleaned_name = item_name.strip().capitalize()
+    cursor.execute("SELECT id, quantity, unit FROM inventory WHERE item_name = ?", (cleaned_name,))
+    item = cursor.fetchone()
+    
+    if item:
+        inv_id, inv_qty, inv_unit = item
+        conv_qty = convert_qty(qty_needed, recipe_unit, inv_unit)
+        new_qty = inv_qty + conv_qty
+        cursor.execute("UPDATE inventory SET quantity = ? WHERE id = ?", (new_qty, inv_id))
+    else:
+        cursor.execute("""
+            INSERT INTO inventory (item_name, category, quantity, unit) 
+            VALUES (?, 'Spesa', ?, ?)
+        """, (cleaned_name, qty_needed, recipe_unit))
+
 def get_available_units():
     """Retrieves all available measurement units from the database."""
     conn = get_connection()

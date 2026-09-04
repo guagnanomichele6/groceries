@@ -1,3 +1,4 @@
+import sqlite3
 from database.connection import get_connection
 
 def initialize_database():
@@ -48,12 +49,19 @@ def initialize_database():
             amount REAL NOT NULL,
             currency TEXT NOT NULL DEFAULT 'EUR',
             frequency TEXT NOT NULL DEFAULT 'Mensile',
-            day_of_month INTEGER NOT NULL DEFAULT 1,
+            interval_value TEXT NOT NULL DEFAULT '1',
             category TEXT NOT NULL DEFAULT 'Bollette',
             op_type TEXT NOT NULL DEFAULT 'Spesa',
             FOREIGN KEY (account_id) REFERENCES accounts (id)
         )
     ''')
+    
+    # Migrazione per vecchi database che usano day_of_month
+    try:
+        cursor.execute("ALTER TABLE recurring_expenses ADD COLUMN interval_value TEXT NOT NULL DEFAULT '1'")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
     
     # --- 2. POSSESSIONS & INVENTORY MODULE ---
     cursor.execute('''
@@ -143,10 +151,21 @@ def initialize_database():
             currency TEXT NOT NULL DEFAULT 'EUR'
         )
     ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS calendar_slot_ingredients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_id INTEGER,
+            item_name TEXT NOT NULL,
+            quantity REAL NOT NULL,
+            unit TEXT NOT NULL,
+            FOREIGN KEY (schedule_id) REFERENCES calendar_schedule (id) ON DELETE CASCADE
+        )
+    ''')
     
     conn.commit()
     conn.close()
 
 if __name__ == "__main__":
     initialize_database()
-    print("Database successfully initialized via schema.py!")
+    print("Database successfully initialized via scheme.py!")

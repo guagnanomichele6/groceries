@@ -46,11 +46,25 @@ def render_finance_tab(eur_to_jpy, jpy_to_eur):
             if st.button("💾 Salva Modifiche Conti"):
                 conn = get_connection()
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM accounts")
                 for _, row in edited_acc.iterrows():
                     if pd.notna(row['Conto']) and str(row['Conto']).strip() != "":
-                        cursor.execute("INSERT INTO accounts (id, name, type, balance, currency) VALUES (?, ?, ?, ?, ?)",
-                                       (int(row['id']) if pd.notna(row['id']) else None, str(row['Conto']).strip(), str(row['Tipo']), float(row['Saldo']), str(row['Valuta'])))
+                        acc_id = int(row['id']) if pd.notna(row['id']) else None
+                        acc_name = str(row['Conto']).strip()
+                        acc_type = str(row['Tipo'])
+                        acc_bal = float(row['Saldo'])
+                        acc_curr = str(row['Valuta'])
+                        
+                        if acc_id:
+                            cursor.execute("""
+                                UPDATE accounts 
+                                SET name = ?, type = ?, balance = ?, currency = ? 
+                                WHERE id = ?
+                            """, (acc_name, acc_type, acc_bal, acc_curr, acc_id))
+                        else:
+                            cursor.execute("""
+                                INSERT INTO accounts (name, type, balance, currency) 
+                                VALUES (?, ?, ?, ?)
+                            """, (acc_name, acc_type, acc_bal, acc_curr))
                 conn.commit()
                 conn.close()
                 st.success("Conti aggiornati.")
@@ -282,7 +296,7 @@ def render_finance_tab(eur_to_jpy, jpy_to_eur):
         else:
             with st.form("add_recurring_form"):
                 st.markdown("**Crea Nuovo Modello Ricorrente (Spesa o Entrata)**")
-                r_name = st.text_input("Nome (es. Stipendio, Affitto, Netflix)")
+                r_name = st.text_input("Nome (es. Stipendio, Affitto, Abbonamento Annuale)")
                 col_r1, col_r2, col_r3 = st.columns(3)
                 with col_r1: r_type = st.selectbox("Tipo", ["Spesa", "Entrata"])
                 with col_r2: r_acc_name = st.selectbox("Conto", acc_global_names)
@@ -291,19 +305,42 @@ def render_finance_tab(eur_to_jpy, jpy_to_eur):
                 col_r4, col_r5, col_r6 = st.columns(3)
                 with col_r4: r_cat = st.selectbox("Categoria", expense_categories, index=2)
                 with col_r5: r_amount = st.number_input("Importo", value=0.0, step=10.0)
-                with col_r6: r_day = st.number_input("Giorno", value=1, min_value=1, max_value=31, step=1)
                 
+                # NUOVA GESTIONE FREQUENZA FLUIDA
+                with col_r6: 
+                    r_freq = st.selectbox("Frequenza", ["Giornaliera", "Settimanale", "Mensile", "Annuale"])
+
+                # Adattiamo il selettore del "giorno/intervallo" in base alla frequenza scelta
+                if r_freq == "Giornaliera":
+                    r_interval = 1
+                    st.caption("🔄 Si ripeterà ogni giorno.")
+                elif r_freq == "Settimanale":
+                    r_interval = st.selectbox("Giorno della settimana", [
+                        "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"
+                    ])
+                    # Mappiamo in un intero da 0 a 6
+                    days_map = {"Lunedì": 0, "Martedì": 1, "Mercoledì": 2, "Giovedì": 3, "Venerdì": 4, "Sabato": 5, "Domenica": 6}
+                    r_interval = days_map[r_interval]
+                elif r_freq == "Mensile":
+                    r_interval = st.number_input("Giorno del mese", value=1, min_value=1, max_value=31, step=1)
+                else: # Annuale
+                    r_interval = st.date_input("Data di riferimento annuale", value=date.today())
+                    # Per semplicità di salvataggio SQLite, possiamo salvare la stringa "MM-DD" o trasformarla in un formato gestibile, oppure mantenere una data formattata come stringa nel DB.
+
                 if st.form_submit_button("➕ Salva Modello") and r_name:
                     r_acc_id = acc_global_dict[r_acc_name]['id']
+                    # Se annuale salviamo la data come stringa o gestiamo l'intervallo
+                    val_to_save = str(r_interval) if r_freq == "Annuale" else int(r_interval)
+                    
                     conn = get_connection()
                     cursor = conn.cursor()
                     cursor.execute("""
-                        INSERT INTO recurring_expenses (name, account_id, amount, currency, frequency, day_of_month, category, op_type) 
-                        VALUES (?, ?, ?, ?, 'Mensile', ?, ?, ?)
-                    """, (r_name.strip().capitalize(), r_acc_id, r_amount, r_curr, int(r_day), r_cat, r_type))
+                        INSERT INTO recurring_expenses (name, account_id, amount, currency, frequency, interval_value, category, op_type) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (r_name.strip().capitalize(), r_acc_id, r_amount, r_curr, r_freq, val_to_save, r_cat, r_type))
                     conn.commit()
                     conn.close()
-                    st.success("Modello ricorrente aggiunto!")
+                    st.success("Modello ricorrente flessibile aggiunto!")
                     st.rerun()
 
     with sub_f5:
